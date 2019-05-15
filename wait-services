@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+
+: ${WAIT_SERVICES:?}
+: ${WAIT_ATTEMPTS:=30}
+: ${WAIT_BEFORE:=0}
+: ${WAIT_SLEEP:=1}
+: ${WAIT_AFTER:=0}
+
+CONNECT_TIMEOUT=1
+TIMEOUT_OPTION=""
+
+
+timeout --help 2>&1 | grep -q '\-t' && {
+    TIMEOUT_OPTION=-t
+}
+
+read not_ready_services <<< ${WAIT_SERVICES//,/ }
+
+function check_service() {
+    local service=${1:?}
+    local host port
+    read host port <<< ${service//:/ }
+    timeout ${TIMEOUT_OPTION} ${CONNECT_TIMEOUT} bash -c "< /dev/tcp/${host}/${port}"
+}
+
+function check_services() {
+    local services=$@
+    local service
+
+    for service in ${services}
+    do
+        check_service ${service}
+        if [[ "$?" -ne 0 ]]; then
+            echo "Service ${service} is not ready"
+            return 1
+        else
+            echo "Service ${service} is ready"
+            shift
+            not_ready_services=$@
+        fi
+    done
+}
+
+[[ ${WAIT_BEFORE} > 0 ]] && sleep ${WAIT_BEFORE}
+
+attempts=${WAIT_ATTEMPTS}
+while [[ ${attempts} > 0 ]] ; do
+    check_services ${not_ready_services} && {
+        [[ ${WAIT_AFTER} > 0 ]] && sleep ${WAIT_AFTER}
+        echo "All services have been started successfully"
+        exit 0
+    }
+    let attempts-=1
+    sleep ${WAIT_SLEEP}
+done
